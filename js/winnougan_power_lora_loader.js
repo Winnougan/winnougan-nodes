@@ -7,6 +7,203 @@ const PROP_SHOW_STRENGTHS = "Show Strengths";
 const PROP_VALUE_SINGLE = "Single Strength";
 const PROP_VALUE_SEPARATE = "Separate Model & Clip";
 
+// ── Cached lora list ──────────────────────────────────────────────────────────
+
+let _loraCache = null;
+function getLoras() {
+  if (_loraCache) return Promise.resolve(_loraCache);
+  return fetch("/object_info/LoraLoader")
+    .then(r => r.json())
+    .then(data => {
+      _loraCache = data?.LoraLoader?.input?.required?.lora_name?.[0] ?? [];
+      return _loraCache;
+    });
+}
+
+// ── Live search dialog ────────────────────────────────────────────────────────
+
+function showLoraSearchDialog(currentValue, onSelect) {
+  const existing = document.getElementById("winnougan-lora-search-overlay");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "winnougan-lora-search-overlay";
+  Object.assign(overlay.style, {
+    position: "fixed", inset: "0", zIndex: "9999",
+    background: "rgba(0,0,0,0.5)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  });
+
+  const dialog = document.createElement("div");
+  Object.assign(dialog.style, {
+    background: "#1a1a1a", border: "1px solid #444",
+    borderRadius: "8px", padding: "12px",
+    width: "480px", maxWidth: "90vw",
+    display: "flex", flexDirection: "column", gap: "8px",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+  });
+
+  const title = document.createElement("div");
+  title.textContent = "Search LoRA";
+  Object.assign(title.style, {
+    color: "#ccc", fontSize: "12px", fontWeight: "bold",
+    textTransform: "uppercase", letterSpacing: "0.08em",
+    marginBottom: "2px",
+  });
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "Type to filter... (e.g. 'aes')";
+  input.value = currentValue || "";
+  Object.assign(input.style, {
+    background: "#111", border: "1px solid #555", borderRadius: "5px",
+    color: "#eee", fontSize: "14px", padding: "8px 10px",
+    outline: "none", width: "100%", boxSizing: "border-box",
+  });
+
+  const list = document.createElement("div");
+  Object.assign(list.style, {
+    maxHeight: "320px", overflowY: "auto",
+    border: "1px solid #333", borderRadius: "5px",
+    background: "#111",
+  });
+
+  const status = document.createElement("div");
+  Object.assign(status.style, {
+    color: "#666", fontSize: "12px", textAlign: "center", padding: "4px 0",
+  });
+
+  dialog.appendChild(title);
+  dialog.appendChild(input);
+  dialog.appendChild(list);
+  dialog.appendChild(status);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  let allLoras = [];
+  let selectedIndex = -1;
+  let rows = [];
+
+  function renderList(filter) {
+    list.innerHTML = "";
+    rows = [];
+    selectedIndex = -1;
+
+    const q = filter.trim().toLowerCase();
+    const filtered = q
+      ? allLoras.filter(l => l.toLowerCase().includes(q))
+      : allLoras;
+
+    status.textContent = `${filtered.length} of ${allLoras.length} loras`;
+
+    if (filtered.length === 0) {
+      const empty = document.createElement("div");
+      empty.textContent = "No matches found";
+      Object.assign(empty.style, {
+        color: "#555", fontSize: "13px", padding: "12px", textAlign: "center",
+      });
+      list.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach((lora, i) => {
+      const row = document.createElement("div");
+      const loraName = lora.split(/[\\/]/).pop();
+      const loraPath = lora.includes("/") || lora.includes("\\")
+        ? lora.substring(0, lora.lastIndexOf(loraName))
+        : "";
+
+      row.innerHTML = q
+        ? highlightMatch(lora, q)
+        : `<span style="color:#ccc">${escapeHtml(lora)}</span>`;
+
+      Object.assign(row.style, {
+        padding: "7px 10px", cursor: "pointer", fontSize: "13px",
+        borderBottom: "1px solid #1e1e1e", userSelect: "none",
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      });
+
+      row.addEventListener("mouseenter", () => setSelected(i));
+      row.addEventListener("click", () => { choose(filtered[i]); });
+      list.appendChild(row);
+      rows.push({ el: row, value: filtered[i] });
+    });
+
+    if (rows.length > 0) setSelected(0);
+  }
+
+  function highlightMatch(text, q) {
+    const escaped = escapeHtml(text);
+    const idx = text.toLowerCase().indexOf(q);
+    if (idx === -1) return `<span style="color:#ccc">${escaped}</span>`;
+    const before = escapeHtml(text.slice(0, idx));
+    const match = escapeHtml(text.slice(idx, idx + q.length));
+    const after = escapeHtml(text.slice(idx + q.length));
+    return `<span style="color:#ccc">${before}<span style="color:#7dffb3;font-weight:bold">${match}</span>${after}</span>`;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function setSelected(i) {
+    rows.forEach((r, ri) => {
+      r.el.style.background = ri === i ? "#2a4a3a" : "transparent";
+    });
+    selectedIndex = i;
+    if (rows[i]) {
+      rows[i].el.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function choose(value) {
+    overlay.remove();
+    onSelect(value);
+  }
+
+  function close() {
+    overlay.remove();
+  }
+
+  input.addEventListener("input", () => renderList(input.value));
+
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelected(Math.min(selectedIndex + 1, rows.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelected(Math.max(selectedIndex - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (selectedIndex >= 0 && rows[selectedIndex]) {
+        choose(rows[selectedIndex].value);
+      } else if (input.value.trim()) {
+        choose(input.value.trim());
+      }
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
+
+  overlay.addEventListener("click", e => {
+    if (e.target === overlay) close();
+  });
+
+  getLoras().then(loras => {
+    allLoras = loras;
+    renderList(input.value);
+    input.focus();
+    input.select();
+  }).catch(() => {
+    status.textContent = "Could not load lora list — press Enter to use typed name";
+    input.focus();
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter" && input.value.trim()) choose(input.value.trim());
+    });
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isLowQuality() {
@@ -31,13 +228,12 @@ function drawToggle(ctx, x, y, h, value) {
   ctx.roundRect(tx, ty, tw, th, r);
   ctx.fillStyle = value ? "#4a9f5f" : "#555";
   ctx.fill();
-  // knob
   const knobX = value ? tx + tw - r - 2 : tx + r + 2;
   ctx.beginPath();
   ctx.arc(knobX, ty + r, r - 2, 0, Math.PI * 2);
   ctx.fillStyle = "#fff";
   ctx.fill();
-  return [x, tw + 8]; // [startX, width]
+  return [x, tw + 8];
 }
 
 function drawArrowButton(ctx, x, y, w, h, dir) {
@@ -57,8 +253,7 @@ function drawStrengthWidget(ctx, posX, posY, h, value, direction = -1) {
   const bw = 18, vw = 50;
   const totalW = bw + vw + bw;
   const startX = direction < 0 ? posX - totalW : posX;
-  const [la] = drawArrowButton(ctx, startX, posY, bw, h, -1);
-  // value box
+  drawArrowButton(ctx, startX, posY, bw, h, -1);
   ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR ?? "#333";
   ctx.fillRect(startX + bw, posY + h * 0.15, vw, h * 0.7);
   ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR ?? "#eee";
@@ -67,7 +262,7 @@ function drawStrengthWidget(ctx, posX, posY, h, value, direction = -1) {
   ctx.textBaseline = "middle";
   ctx.fillText(Number(value).toFixed(2), startX + bw + vw / 2, posY + h / 2);
   drawArrowButton(ctx, startX + bw + vw, posY, bw, h, 1);
-  return [startX, totalW]; // [x, width]
+  return [startX, totalW];
 }
 
 function fitString(ctx, str, maxWidth) {
@@ -96,7 +291,9 @@ class PowerLoraWidget {
 
   get value() { return this._value; }
   set value(v) {
-    this._value = (v && typeof v === "object") ? v : { on: true, lora: null, strength: 1.0, strengthTwo: null };
+    this._value = (v && typeof v === "object")
+      ? v
+      : { on: true, lora: null, strength: 1.0, strengthTwo: null };
   }
 
   computeSize() { return [220, 30]; }
@@ -111,7 +308,6 @@ class PowerLoraWidget {
     ctx.save();
     drawRoundedRect(ctx, margin, posY + 2, widgetWidth - margin * 2, height - 4);
 
-    // Toggle
     const [tX, tW] = drawToggle(ctx, margin + 4, posY, height, this._value.on);
     this.hitAreas.toggle = { x: tX, y: posY, w: tW + 4, h: height };
     let posX = margin + 4 + tW + im;
@@ -122,22 +318,18 @@ class PowerLoraWidget {
     ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR ?? "#ccc";
     ctx.textBaseline = "middle";
 
-    // Strength(s) on right
     let rposX = widgetWidth - margin - im;
 
     if (showSep && this._value.strengthTwo != null) {
-      // Clip strength (rightmost)
       const [sx2, sw2] = drawStrengthWidget(ctx, rposX, posY, height, this._value.strengthTwo ?? 1);
       this.hitAreas.strengthTwo = { x: sx2, y: posY, w: sw2, h: height };
       rposX = sx2 - im * 2;
     }
 
-    // Model / single strength
     const [sx, sw] = drawStrengthWidget(ctx, rposX, posY, height, this._value.strength ?? 1);
     this.hitAreas.strength = { x: sx, y: posY, w: sw, h: height };
     rposX = sx - im;
 
-    // Lora name
     const loraW = rposX - posX - im;
     ctx.textAlign = "left";
     ctx.font = `${height * 0.4}px sans-serif`;
@@ -148,10 +340,8 @@ class PowerLoraWidget {
     ctx.restore();
   }
 
-  // returns true if event was inside one of this widget's hit areas
   mouse(event, pos, node) {
     const [mx, my] = pos;
-
     const inRect = (r) => r && mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
 
     if (event.type === "pointerdown" || event.type === "mousedown") {
@@ -165,7 +355,6 @@ class PowerLoraWidget {
         const relX = mx - this.hitAreas.strength.x;
         if (relX < bw) { this.stepStrength(-1, false); node.setDirtyCanvas(true); return true; }
         if (relX > bw + vw) { this.stepStrength(1, false); node.setDirtyCanvas(true); return true; }
-        // drag on value
         this.draggingStrength = true;
         this.dragIsTwo = false;
         this.dragStartX = mx;
@@ -184,7 +373,10 @@ class PowerLoraWidget {
         return true;
       }
       if (inRect(this.hitAreas.lora)) {
-        this._showLoraChooser(event, node);
+        showLoraSearchDialog(this._value.lora, (chosen) => {
+          this._value.lora = chosen;
+          node.setDirtyCanvas(true);
+        });
         return true;
       }
     }
@@ -209,31 +401,6 @@ class PowerLoraWidget {
     this._value[prop] = Math.round(((this._value[prop] ?? 1) + dir * 0.05) * 100) / 100;
   }
 
-  _showLoraChooser(event, node) {
-    // Build lora list from ComfyUI's widget definitions
-    const loraDef = app.graph?.extra?.ds ?? null;
-    // Fetch available loras from the server
-    fetch("/object_info/LoraLoader")
-      .then(r => r.json())
-      .then(data => {
-        const loras = data?.LoraLoader?.input?.required?.lora_name?.[0] ?? [];
-        const menuItems = ["None", ...loras].map(l => ({
-          content: l,
-          callback: () => {
-            this._value.lora = l === "None" ? null : l;
-            node.setDirtyCanvas(true);
-          }
-        }));
-        new LiteGraph.ContextMenu(menuItems, {
-          title: "Choose LoRA",
-          event: event,
-        });
-      })
-      .catch(() => {
-        console.warn("[Winnougan] Could not fetch lora list.");
-      });
-  }
-
   serialize() {
     const v = { ...this._value };
     if (v.strengthTwo === null) delete v.strengthTwo;
@@ -241,212 +408,7 @@ class PowerLoraWidget {
   }
 }
 
-// ── Main Node Class ───────────────────────────────────────────────────────────
-
-class WinnouganPowerLoraLoaderNode extends LGraphNode {
-  constructor() {
-    super(NODE_TITLE);
-    this.title = NODE_TITLE;
-    this.color = "#1a2a1a";
-    this.bgcolor = "#0f1f0f";
-    this.serialize_widgets = true;
-    this.properties = {
-      [PROP_SHOW_STRENGTHS]: PROP_VALUE_SINGLE,
-    };
-    this._loraCounter = 0;
-    this._addButton = null;
-
-    // Outputs
-    this.addOutput("MODEL", "MODEL");
-    this.addOutput("CLIP", "CLIP");
-    // Inputs
-    this.addInput("model", "MODEL");
-    this.addInput("clip", "CLIP");
-
-    this._addAddButton();
-    this.size = this.computeSize();
-  }
-
-  _addAddButton() {
-    // We'll draw the button ourselves in onDrawForeground
-  }
-
-  addLoraRow(value) {
-    this._loraCounter++;
-    const w = new PowerLoraWidget("lora_" + this._loraCounter);
-    if (value) w.value = { ...value };
-    // Insert before last "button" spot
-    if (!this.widgets) this.widgets = [];
-    this.widgets.push(w);
-    this._recalcSize();
-    return w;
-  }
-
-  removeLoraWidget(widget) {
-    const idx = this.widgets.indexOf(widget);
-    if (idx !== -1) this.widgets.splice(idx, 1);
-    this._recalcSize();
-  }
-
-  _loraWidgets() {
-    return (this.widgets ?? []).filter(w => w.name?.startsWith("lora_"));
-  }
-
-  _recalcSize() {
-    const rows = this._loraWidgets().length;
-    this.size[1] = Math.max(130 + rows * 34, this.size[1]);
-    this.setDirtyCanvas(true, true);
-  }
-
-  onDrawForeground(ctx) {
-    if (this.flags?.collapsed) return;
-    const w = this.size[0], h = this.size[1];
-    const margin = 10;
-    const btnH = 26;
-    const btnY = h - btnH - 8;
-
-    // "+ Add Lora" button
-    ctx.save();
-    ctx.fillStyle = "#2a5a2a";
-    ctx.strokeStyle = "#4a9f4a";
-    ctx.lineWidth = 1;
-    const bx = margin, by = btnY, bw = w - margin * 2;
-    ctx.beginPath();
-    ctx.roundRect(bx, by, bw, btnH, 5);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = "#aaffaa";
-    ctx.font = `bold ${btnH * 0.48}px sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("➕ Add Lora", bx + bw / 2, by + btnH / 2);
-
-    // Header
-    const hasLoras = this._loraWidgets().length > 0;
-    if (hasLoras && !isLowQuality()) {
-      const showSep = this.properties?.[PROP_SHOW_STRENGTHS] === PROP_VALUE_SEPARATE;
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR ?? "#ccc";
-      ctx.font = `${10}px sans-serif`;
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-      const headerY = (this.widgets?.[0]?.last_y ?? 40) - 10;
-      ctx.fillText(showSep ? "Model  Clip" : "Strength", w - margin - 4, headerY);
-    }
-
-    ctx.restore();
-
-    // Store button bounds for click detection
-    this._addBtnBounds = { x: margin, y: btnY + this.pos[1], w: w - margin * 2, h: btnH };
-  }
-
-  onMouseDown(event, pos, canvas) {
-    // Check "+ Add Lora" button
-    const [mx, my] = pos;
-    const h = this.size[1], margin = 10, btnH = 26;
-    const btnY = h - btnH - 8;
-    if (mx >= margin && mx <= this.size[0] - margin && my >= btnY && my <= btnY + btnH) {
-      this._showAddLoraMenu(event);
-      return true;
-    }
-    return false;
-  }
-
-  _showAddLoraMenu(event) {
-    fetch("/object_info/LoraLoader")
-      .then(r => r.json())
-      .then(data => {
-        const loras = data?.LoraLoader?.input?.required?.lora_name?.[0] ?? [];
-        const menuItems = loras.map(l => ({
-          content: l,
-          callback: () => {
-            const w = this.addLoraRow({ on: true, lora: l, strength: 1.0, strengthTwo: null });
-            this.size[1] = Math.max(this.size[1], this.computeSize()[1]);
-            this.setDirtyCanvas(true, true);
-          }
-        }));
-        new LiteGraph.ContextMenu(menuItems, {
-          title: "Add LoRA",
-          event: event,
-        });
-      })
-      .catch(() => console.warn("[Winnougan] Could not load lora list."));
-  }
-
-  getExtraMenuOptions(canvas, options) {
-    // Right-click on a lora row
-    const pos = canvas.canvas_mouse;
-    if (!pos) return;
-    const localPos = [pos[0] - this.pos[0], pos[1] - this.pos[1]];
-
-    const loraWidgets = this._loraWidgets();
-    for (const widget of loraWidgets) {
-      const wy = widget.last_y;
-      const wh = 30;
-      if (localPos[1] >= wy && localPos[1] <= wy + wh) {
-        const idx = loraWidgets.indexOf(widget);
-        options.push(
-          null,
-          {
-            content: widget.value.on ? "⚫ Toggle Off" : "🟢 Toggle On",
-            callback: () => { widget.value.on = !widget.value.on; this.setDirtyCanvas(true); }
-          },
-          {
-            content: "⬆️ Move Up",
-            disabled: idx === 0,
-            callback: () => {
-              const all = this.widgets;
-              const wi = all.indexOf(widget);
-              if (wi > 0) { [all[wi - 1], all[wi]] = [all[wi], all[wi - 1]]; }
-              this.setDirtyCanvas(true);
-            }
-          },
-          {
-            content: "⬇️ Move Down",
-            disabled: idx === loraWidgets.length - 1,
-            callback: () => {
-              const all = this.widgets;
-              const wi = all.indexOf(widget);
-              if (wi < all.length - 1) { [all[wi], all[wi + 1]] = [all[wi + 1], all[wi]]; }
-              this.setDirtyCanvas(true);
-            }
-          },
-          {
-            content: "🗑️ Remove",
-            callback: () => { this.removeLoraWidget(widget); }
-          }
-        );
-        return;
-      }
-    }
-  }
-
-  onSerialize(o) {
-    o.widgets_values = this._loraWidgets().map(w => w.serialize());
-  }
-
-  onConfigure(o) {
-    // Restore lora widgets from saved data
-    const saved = o.widgets_values ?? [];
-    // Clear existing lora widgets
-    this.widgets = (this.widgets ?? []).filter(w => !w.name?.startsWith("lora_"));
-    this._loraCounter = 0;
-    for (const v of saved) {
-      if (v && typeof v.lora !== "undefined") {
-        this.addLoraRow(v);
-      }
-    }
-    this.size[1] = Math.max(130 + this._loraWidgets().length * 34, this.size[1] ?? 0);
-  }
-
-  computeSize() {
-    const rows = this._loraWidgets().length;
-    return [340, 130 + rows * 34];
-  }
-}
-
-// ── Register ──────────────────────────────────────────────────────────────────
+// ── Register extension ────────────────────────────────────────────────────────
 
 app.registerExtension({
   name: "Winnougan.PowerLoraLoader",
@@ -454,7 +416,6 @@ app.registerExtension({
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
     if (nodeData.name !== NODE_TYPE) return;
 
-    // Override the node class
     const origOnNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       origOnNodeCreated?.call(this);
@@ -465,7 +426,6 @@ app.registerExtension({
       this.properties ??= {};
       this.properties[PROP_SHOW_STRENGTHS] ??= PROP_VALUE_SINGLE;
 
-      // Ensure outputs/inputs exist
       if (this.outputs?.length === 0) {
         this.addOutput("MODEL", "MODEL");
         this.addOutput("CLIP", "CLIP");
@@ -500,20 +460,10 @@ app.registerExtension({
       this.setDirtyCanvas(true, true);
     };
 
-    nodeType.prototype._showAddLoraMenu = function (event) {
-      fetch("/object_info/LoraLoader")
-        .then(r => r.json())
-        .then(data => {
-          const loras = data?.LoraLoader?.input?.required?.lora_name?.[0] ?? [];
-          const items = loras.map(l => ({
-            content: l,
-            callback: () => {
-              this.addLoraRow({ on: true, lora: l, strength: 1.0 });
-            }
-          }));
-          new LiteGraph.ContextMenu(items, { title: "Add LoRA", event });
-        })
-        .catch(() => console.warn("[Winnougan] Could not load lora list."));
+    nodeType.prototype._showAddLoraMenu = function () {
+      showLoraSearchDialog(null, (chosen) => {
+        if (chosen) this.addLoraRow({ on: true, lora: chosen, strength: 1.0 });
+      });
     };
 
     nodeType.prototype.onDrawForeground = function (ctx) {
@@ -549,11 +499,10 @@ app.registerExtension({
       const btnY = this._addBtnRelY ?? (this.size[1] - btnH - 8);
 
       if (mx >= margin && mx <= this.size[0] - margin && my >= btnY && my <= btnY + btnH) {
-        this._showAddLoraMenu(event);
+        this._showAddLoraMenu();
         return true;
       }
 
-      // Pass to lora widgets
       for (const w of this._loraWidgets()) {
         if (w.mouse && w.mouse(event, pos, this)) return true;
       }
@@ -620,7 +569,6 @@ app.registerExtension({
         }
       }
 
-      // Global toggle option
       options.push(null, {
         content: "Show Separate Model & Clip Strengths",
         callback: () => {
@@ -653,7 +601,6 @@ app.registerExtension({
       this.size[1] = Math.max(130 + this._loraWidgets().length * 34, this.size[1] ?? 130);
     };
 
-    // Custom draw for lora rows
     const origOnDrawWidgets = nodeType.prototype.onDrawWidgets;
     nodeType.prototype.onDrawWidgets = function (ctx) {
       origOnDrawWidgets?.call(this, ctx);
