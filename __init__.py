@@ -1,0 +1,5 @@
+from .winnougan_power_lora_loader import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+
+WEB_DIRECTORY = "./js"
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
