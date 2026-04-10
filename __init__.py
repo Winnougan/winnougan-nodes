@@ -1,4 +1,14 @@
-from .winnougan_power_lora_loader import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+from .winnougan_power_lora_loader import (
+    NODE_CLASS_MAPPINGS as LORA_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as LORA_DISPLAY,
+)
+from .winnougan_resolution_picker import (
+    NODE_CLASS_MAPPINGS as RES_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as RES_DISPLAY,
+)
+
+NODE_CLASS_MAPPINGS        = {**LORA_MAPPINGS, **RES_MAPPINGS}
+NODE_DISPLAY_NAME_MAPPINGS = {**LORA_DISPLAY,  **RES_DISPLAY}
 
 WEB_DIRECTORY = "./js"
 
