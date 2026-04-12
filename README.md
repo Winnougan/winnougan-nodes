@@ -43,3 +43,10 @@ noise_scale — a tiny amount of random noise added to cached outputs. For image
 Auto-detection — when you leave warmup and skip at 0, the node reads the transformer class name and applies model-specific defaults. Z-Image gets a longer warmup (8 steps) because it's more quality-sensitive. Flux gets lighter caching (warmup 3, skip every 2nd). Video models get noise injection turned on automatically.
 
 Expected speedup — roughly 1.3x to 1.8x depending on the model and settings, with negligible quality loss at conservative settings. The summary printed after each run shows you the exact hit rate and estimated speedup so you can tune it.
+
+New nodes:
+Clip loader. This one's a doozy. You can load one or two clips by toggling them on or off. And it does regular clips or GGUF clips! No more searching for single or dual clip loaders and then scrounging around looking for GGUF clips. We got you bro.
+
+Diffusion and GGUF model loader all-in-one (AIO). I got you bro, I promise! This one's amazing, switch between your regular diffuser (mxfp8 or nvpf4 or fp8) and your GGUF model. I've included patching Sageattention and KV cache! AIO!
+
+More to come!
