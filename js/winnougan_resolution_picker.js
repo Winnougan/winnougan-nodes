@@ -316,7 +316,7 @@ app.registerExtension({
       this._customHeight = 1024;
       this._batchSize    = 1;
 
-      this.size = [300, 210];
+      this.size = [300, 240];
     };
 
     // ── Provide values to the server via onSerialize ──────────────────────
@@ -376,7 +376,7 @@ app.registerExtension({
       const pad = 14;
       const iw  = W - pad * 2;
 
-      const modeY    = TH + 12;
+      const modeY    = TH + 42;
       const modeH    = 28;
       const halfIw   = (iw - 8) / 2;
       const contentY = modeY + modeH + 16;
@@ -586,7 +586,7 @@ app.registerExtension({
     };
 
     nodeType.prototype.computeSize = function () {
-      return [300, this._mode === "custom" ? 230 : 210];
+      return [300, this._mode === "custom" ? 260 : 240];
     };
   },
 });
