@@ -1,7 +1,7 @@
 [project]
 name = "winnougan-power-lora-loader"
 description = "A powerful, flexible LoRA loader node for ComfyUI with toggle, reorder, and multi-strength support."
-version = "2.0.4"
+version = "2.0.5"
 license = { file = "LICENSE" }
 dependencies = []
 
