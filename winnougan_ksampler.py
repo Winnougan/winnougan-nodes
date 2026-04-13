@@ -213,35 +213,22 @@ class WinnouganKSampler:
         else:
             sampler_obj = comfy.samplers.sampler_object(sampler_name)
 
-        # Run sampling
-        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED if hasattr(comfy, "utils") else False
-        try:
-            samples = comfy.sample.sample(
-                model,
-                comfy.sample.prepare_noise(latent_image_, seed, None),
-                latent_image_,
-                positive,
-                negative,
-                sampler_obj,
-                effective_sigmas,
-                model_options  = model.model_options,
-                latent_image   = latent_image_,
-                denoise_mask   = noise_mask,
-                callback       = None,
-                disable_pbar   = False,
-                seed           = seed,
-            )
-        except TypeError:
-            # Older ComfyUI signature without some kwargs
-            samples = comfy.sample.sample(
-                model,
-                comfy.sample.prepare_noise(latent_image_, seed, None),
-                latent_image_,
-                positive,
-                negative,
-                sampler_obj,
-                effective_sigmas,
-            )
+        # Run sampling via sample_custom (accepts pre-built sampler_obj + sigmas directly)
+        noise = comfy.sample.prepare_noise(latent_image_, seed, None)
+        samples = comfy.sample.sample_custom(
+            model,
+            noise,
+            cfg,
+            sampler_obj,
+            effective_sigmas,
+            positive,
+            negative,
+            latent_image_,
+            noise_mask   = noise_mask,
+            callback     = None,
+            disable_pbar = False,
+            seed         = seed,
+        )
 
         out         = latent.copy()
         out["samples"] = samples

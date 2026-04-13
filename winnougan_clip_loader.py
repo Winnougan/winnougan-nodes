@@ -188,7 +188,8 @@ class WinnouganCLIPLoader:
     # CLIP type options mirroring ComfyUI's standard loader
     CLIP_TYPES = ["stable_diffusion", "stable_cascade", "sd3", "stable_audio",
                   "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan",
-                  "hidream", "chroma", "ace"]
+                  "hidream", "chroma", "ace",
+                  "qwen_image", "flux2", "ovis", "longcat_image"]
 
     @classmethod
     def INPUT_TYPES(cls):
