@@ -335,7 +335,7 @@ function fitString(ctx, str, maxWidth) {
 
 // ── Row height constant ───────────────────────────────────────────────────────
 
-const ROW_HEIGHT = 38; // increase this single value to make all rows taller
+const ROW_HEIGHT = 28; // increase this single value to make all rows taller
 
 // ── Global toggle header widget ───────────────────────────────────────────────
 
@@ -655,7 +655,7 @@ app.registerExtension({
     nodeType.prototype._recalcHeight = function () {
       const rows   = this._loraWidgets().length;
       const needed = 60
-                   + rows * (ROW_HEIGHT + 1)
+                   + rows * ROW_HEIGHT
                    + 40;
       this.size[1] = Math.max(needed, this.size[1]);
     };
@@ -803,14 +803,14 @@ app.registerExtension({
         if (v && typeof v.lora !== "undefined") this.addLoraRow(v);
       }
       this.size[1] = Math.max(
-        44 + this._loraWidgets().length * (ROW_HEIGHT + 1) + 32,
+        44 + this._loraWidgets().length * ROW_HEIGHT + 32,
         this.size[1] ?? 100
       );
     };
 
     nodeType.prototype.computeSize = function () {
       const rows = this._loraWidgets().length;
-      return [340, 60 + rows * (ROW_HEIGHT + 1) + 40];
+      return [340, 60 + rows * ROW_HEIGHT + 40];
     };
   },
 });
