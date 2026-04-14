@@ -20,11 +20,6 @@ class WinnouganResolutionPicker:
                 "batch_size": ("INT", {"default": 1,    "min": 1,  "max": 64,   "step": 1,
                                        "tooltip": "Number of latents to generate"}),
             },
-            "hidden": {
-                "_width":      ("INT", {"default": 1024}),
-                "_height":     ("INT", {"default": 1024}),
-                "_batch_size": ("INT", {"default": 1}),
-            },
         }
 
     RETURN_TYPES = ("INT", "INT", "LATENT")
@@ -33,19 +28,15 @@ class WinnouganResolutionPicker:
 
     def pick_resolution(
         self,
-        width=None,  height=None,  batch_size=None,
-        _width=1024, _height=1024, _batch_size=1,
+        width=1024,
+        height=1024,
+        batch_size=1,
     ):
-        # Prefer explicit inputs (subgraph connections) over the UI-driven hidden values
-        w = width      if width      is not None else _width
-        h = height     if height     is not None else _height
-        b = batch_size if batch_size is not None else _batch_size
-
         latent = torch.zeros(
-            [b, 16, h // 8, w // 8],
+            [batch_size, 16, height // 8, width // 8],
             dtype=torch.float32,
         )
-        return (w, h, {"samples": latent})
+        return (width, height, {"samples": latent})
 
 
 NODE_CLASS_MAPPINGS = {

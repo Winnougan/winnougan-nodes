@@ -24,9 +24,9 @@ class WinnouganLTXResolutionPicker:
     FUNCTION = "pick_resolution"
 
     def pick_resolution(self, width=1280, height=720, batch_size=1):
-        # LTX-Video uses a 32-channel latent space with 1/8 spatial compression
+        # LTX-Video uses a 16-channel latent space with 1/8 spatial compression
         latent = torch.zeros(
-            [batch_size, 128, 1, height // 32, width // 32],
+            [batch_size, 16, 1, height // 8, width // 8],
             dtype=torch.float32
         )
         return (width, height, {"samples": latent})
