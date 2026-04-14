@@ -385,7 +385,7 @@ function drawToggle(ctx, x, y, h, value) {
 
 function drawArrowButton(ctx, x, y, w, h, dir) {
   ctx.beginPath();
-  ctx.roundRect(x, y + h * 0.15, w, h * 0.7, 3);
+  ctx.roundRect(x, y + h * 0.1, w, h * 0.8, 3);
   ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR ?? "#333";
   ctx.fill();
   ctx.fillStyle    = LiteGraph.WIDGET_TEXT_COLOR ?? "#ccc";
@@ -402,9 +402,9 @@ function drawStrengthWidget(ctx, posX, posY, h, value, direction = -1) {
   const startX = direction < 0 ? posX - totalW : posX;
   drawArrowButton(ctx, startX, posY, bw, h, -1);
   ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR ?? "#333";
-  ctx.fillRect(startX + bw, posY + h * 0.15, vw, h * 0.7);
+  ctx.fillRect(startX + bw, posY + h * 0.1, vw, h * 0.8);
   ctx.fillStyle    = LiteGraph.WIDGET_TEXT_COLOR ?? "#eee";
-  ctx.font         = `bold ${h * 0.42}px monospace`;
+  ctx.font         = `bold ${h * 0.38}px monospace`;
   ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(Number(value).toFixed(2), startX + bw + vw / 2, posY + h / 2);
@@ -420,7 +420,7 @@ function fitString(ctx, str, maxWidth) {
 
 // ── Row height constant ───────────────────────────────────────────────────────
 
-const ROW_HEIGHT = 22; // compact rows — tighter vertical spacing
+const ROW_HEIGHT = 48; // tall rows, rgthree-style
 
 // ── Global toggle header widget ───────────────────────────────────────────────
 
@@ -432,10 +432,11 @@ class GlobalToggleWidget {
     this.hitArea = null;
   }
 
-  computeSize() { return [220, 24]; }
+  computeSize() { return [220, 0]; }  // height managed manually
 
   draw(ctx, node, widgetWidth, posY, height) {
     this.last_y = posY;
+    if (!node._manualDraw) return;  // only render from our manual loop
     if (isLowQuality()) return;
 
     const margin = 10;
@@ -488,10 +489,11 @@ class PowerLoraWidget {
   get value()  { return this._value; }
   set value(v) { this._value = (v && typeof v === "object") ? v : { on: true, lora: null, strength: 1.0, strengthTwo: null }; }
 
-  computeSize() { return [220, ROW_HEIGHT]; }
+  computeSize() { return [220, 0]; }  // height managed manually in onDrawBackground
 
   draw(ctx, node, widgetWidth, posY, height) {
     this.last_y = posY;
+    if (!node._manualDraw) return;  // only render from our manual loop
     const margin = 10, im = margin * 0.33;
     const lowQ   = isLowQuality();
     const midY   = posY + height / 2;
@@ -502,7 +504,7 @@ class PowerLoraWidget {
     const isConnected = inputIdx !== -1 && node.inputs[inputIdx]?.link != null;
 
     ctx.save();
-    drawRoundedRect(ctx, margin, posY + 2, widgetWidth - margin * 2, height - 4);
+    drawRoundedRect(ctx, margin, posY, widgetWidth - margin * 2, height - 1);
 
     const [tX, tW] = drawToggle(ctx, margin + 4, posY, height, this._value.on);
     this.hitAreas.toggle = { x: tX, y: posY, w: tW + 4, h: height };
@@ -510,7 +512,7 @@ class PowerLoraWidget {
 
     // "lora" label after toggle
     ctx.fillStyle    = "#5a8a5a";
-    ctx.font         = `bold ${height * 0.32}px sans-serif`;
+    ctx.font         = `bold ${height * 0.28}px sans-serif`;
     ctx.textAlign    = "left";
     ctx.textBaseline = "middle";
     ctx.fillText("lora", posX, midY);
@@ -551,7 +553,7 @@ class PowerLoraWidget {
       ctx.fillText("⟶ (connected)", posX, midY);
     } else {
       ctx.textAlign = "left";
-      ctx.font      = `${height * 0.38}px sans-serif`;
+      ctx.font      = `${height * 0.40}px sans-serif`;
       const label   = this._value.lora || "None";
       ctx.fillText(fitString(ctx, label, loraW), posX, midY);
     }
@@ -676,7 +678,7 @@ app.registerExtension({
       this.widgets ??= [];
       this.widgets.push(new GlobalToggleWidget());
 
-      this.size = [420, 90];
+      this.size = [460, 80];
     };
 
     // ── Compact input slot positions ─────────────────────────────────────────
@@ -756,11 +758,14 @@ app.registerExtension({
 
     // ── Height calculation ────────────────────────────────────────────────────
     nodeType.prototype._recalcHeight = function () {
-      const rows   = this._loraWidgets().length;
-      const needed = 50
-                   + rows * ROW_HEIGHT
-                   + 36;
-      this.size[1] = Math.max(needed, this.size[1]);
+      const rows    = this._loraWidgets().length;
+      const slotH   = LiteGraph.NODE_SLOT_HEIGHT ?? 20;
+      const nSlots  = Math.max((this.inputs?.length ?? 0), (this.outputs?.length ?? 0));
+      const needed  = slotH * nSlots + 6  // slot rows
+                    + 22 + 4              // global toggle + gap
+                    + rows * ROW_HEIGHT   // lora rows (zero gap between)
+                    + 42;                 // Add Lora button + bottom pad
+      this.size[1] = needed;
     };
 
     nodeType.prototype._showAddLoraMenu = function () {
@@ -770,12 +775,41 @@ app.registerExtension({
     };
 
 
-    // ── Enhanced glow + sparkles ──────────────────────────────────────────
+        // ── Enhanced glow + sparkles ──────────────────────────────────────────
     const origOnDrawBackground = nodeType.prototype.onDrawBackground;
     nodeType.prototype.onDrawBackground = function (ctx) {
         origOnDrawBackground?.call(this, ctx);
         if (!this._sparkles) this._sparkles = new SparkleSystem(14);
         drawEnhancedGlow(ctx, this, this._sparkles);
+
+        // ── Manually draw all widgets with zero inter-row gap ─────────────
+        this._manualDraw = true;
+        // Because computeSize() returns 0, LiteGraph's own widget loop draws
+        // nothing. We take full control here.
+        if (!this.widgets?.length) return;
+        const W   = this.size[0];
+        const TH  = LiteGraph.NODE_TITLE_HEIGHT;
+        // Start Y: below the input/output slot rows
+        const slotH = LiteGraph.NODE_SLOT_HEIGHT ?? 20;
+        const nSlots = Math.max(
+            (this.inputs?.length ?? 0),
+            (this.outputs?.length ?? 0)
+        );
+        let y = slotH * nSlots + 6;
+
+        for (const widget of this.widgets) {
+            if (widget.hidden) continue;
+            const isLora   = widget.name?.startsWith("lora_");
+            const isToggle = widget.name === "__global_toggle__";
+            const rowH     = isLora ? ROW_HEIGHT : (isToggle ? 22 : 20);
+            const gap      = isToggle ? 4 : 0; // small gap after toggle header only
+            widget.last_y  = y;
+            if (widget.draw) widget.draw(ctx, this, W, y, rowH);
+            y += rowH + gap;
+        }
+        // Store the bottom of the last widget for the Add Lora button
+        this._widgetsBottomY = y;
+        this._manualDraw = false;
     };
 
     // ── Draw foreground ───────────────────────────────────────────────────────
@@ -790,13 +824,13 @@ app.registerExtension({
       ctx.fillStyle = "#4ade80"; ctx.shadowColor = "#4ade80";
       const _t = Date.now()/1000;
       ctx.shadowBlur = 6 + (0.5 + 0.5*Math.sin(_t*(2*Math.PI/3))) * 4;
-      ctx.fillText("⚡ WINNOUGAN", this.size[0] - 28, 14);
+      ctx.fillText("⚡ WINNOUGAN", this.size[0] - 76, 14);
       ctx.restore();
 
       // ── "Add Lora" button at the bottom ───────────────────────────────────
       const w = this.size[0], h = this.size[1];
       const margin = 10, btnH = 26;
-      const btnY = h - btnH - 8;
+      const btnY = (this._widgetsBottomY ?? (h - btnH - 8 - 8)) + 4;
 
       ctx.save();
       ctx.fillStyle   = "#2a5a2a";
@@ -924,14 +958,17 @@ app.registerExtension({
         if (v && typeof v.lora !== "undefined") this.addLoraRow(v);
       }
       this.size[1] = Math.max(
-        44 + this._loraWidgets().length * ROW_HEIGHT + 32,
+        (() => { const s = LiteGraph.NODE_SLOT_HEIGHT ?? 20; const n = Math.max((this.inputs?.length??0),(this.outputs?.length??0)); return s*n+6+22+4+this._loraWidgets().length*ROW_HEIGHT+42; })(),
         this.size[1] ?? 100
       );
     };
 
     nodeType.prototype.computeSize = function () {
-      const rows = this._loraWidgets().length;
-      return [340, 60 + rows * ROW_HEIGHT + 40];
+      const rows   = this._loraWidgets().length;
+      const slotH  = LiteGraph.NODE_SLOT_HEIGHT ?? 20;
+      const nSlots = Math.max((this.inputs?.length ?? 0), (this.outputs?.length ?? 0));
+      const h      = slotH * nSlots + 6 + 22 + 4 + rows * ROW_HEIGHT + 42;
+      return [460, h];
     };
   },
 });

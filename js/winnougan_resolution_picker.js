@@ -381,19 +381,24 @@ app.registerExtension({
     nodeType.prototype.onNodeCreated = function () {
       orig?.call(this);
 
-      // ── Hide ALL native widgets immediately ──────────────────────────────
-      // ComfyUI renders hidden inputs as widgets anyway in some versions,
-      // so we forcibly remove every widget after creation.
+      // ── Hide widgets visually but keep them alive so ComfyUI can
+      //    serialize their values to the Python backend.
+      //    Wiping this.widgets = [] breaks serialization entirely.
       setTimeout(() => {
         if (this.widgets?.length) {
-          this.widgets = [];
+          this.widgets.forEach(w => {
+            w.type         = "hidden";
+            w.hidden       = true;
+            w.computeSize  = () => [0, -4]; // collapse row height to zero
+          });
+          this.setSize(this.computeSize());
           this.setDirtyCanvas(true, true);
         }
       }, 0);
 
       this.color   = "#1a2a1a";
       this.bgcolor = "#0f2a0f";
-            this._sparkles = new SparkleSystem(14);
+      this._sparkles = new SparkleSystem(14);
       this.title   = "👉👈 Winnougan Resolution Picker";
 
       this._mode         = "preset";
@@ -405,12 +410,24 @@ app.registerExtension({
       this.size = [300, 240];
     };
 
-    // ── Provide values to the server via onSerialize ──────────────────────
-    // We override the serialize to inject our values as if they were widget values.
+    // ── Sync widget values and serialize ─────────────────────────────────
+    // We must keep the underlying widgets' .value in sync so that
+    // ComfyUI's prompt builder picks up the correct w/h/batch_size.
+    nodeType.prototype._syncWidgetValues = function () {
+      const { w, h } = this._resolvedDims();
+      const widgetW = this.widgets?.find(ww => ww.name === "width");
+      const widgetH = this.widgets?.find(ww => ww.name === "height");
+      const widgetB = this.widgets?.find(ww => ww.name === "batch_size");
+      if (widgetW) widgetW.value = w;
+      if (widgetH) widgetH.value = h;
+      if (widgetB) widgetB.value = this._batchSize;
+    };
+
     nodeType.prototype.onSerialize = function (o) {
+      this._syncWidgetValues();
       const { w, h } = this._resolvedDims();
       o.widgets_values = [w, h, this._batchSize];
-      // Also store our UI state
+      // Store UI state for round-trip restore
       o.winnougan_res = {
         mode:         this._mode,
         presetLabel:  this._presetLabel,
@@ -421,7 +438,14 @@ app.registerExtension({
     };
 
     nodeType.prototype.onConfigure = function (o) {
-      if (this.widgets?.length) this.widgets = [];
+      // Re-hide widgets after loading a saved graph
+      if (this.widgets?.length) {
+        this.widgets.forEach(w => {
+          w.type        = "hidden";
+          w.hidden      = true;
+          w.computeSize = () => [0, -4];
+        });
+      }
       if (o.winnougan_res) {
         const r = o.winnougan_res;
         this._mode         = r.mode         ?? "preset";
@@ -430,21 +454,8 @@ app.registerExtension({
         this._customHeight = r.customHeight ?? 1024;
         this._batchSize    = r.batchSize    ?? 1;
       }
+      this._syncWidgetValues();
       this.setDirtyCanvas(true);
-    };
-
-    // Override getExtraInfo so ComfyUI sends our values to Python
-    nodeType.prototype.getExtraInfo = function () {
-      return {};
-    };
-
-    // This is the key: override the inputs that get sent to the server
-    nodeType.prototype.getInputData = function (slot) {
-      const { w, h } = this._resolvedDims();
-      if (slot === 0) return w;
-      if (slot === 1) return h;
-      if (slot === 2) return this._batchSize;
-      return undefined;
     };
 
     nodeType.prototype._resolvedDims = function () {
@@ -470,7 +481,6 @@ app.registerExtension({
       return { TH, W, pad, iw, modeY, modeH, halfIw, contentY };
     };
 
-    // ── Draw ──────────────────────────────────────────────────────────────
     // ── Enhanced glow + sparkles ──────────────────────────────────────────
     const origOnDrawBackground = nodeType.prototype.onDrawBackground;
     nodeType.prototype.onDrawBackground = function (ctx) {
@@ -482,14 +492,15 @@ app.registerExtension({
     nodeType.prototype.onDrawForeground = function (ctx) {
       if (this.flags?.collapsed) return;
 
-            // ⚡ WINNOUGAN badge
-            ctx.save();
-            ctx.font = "bold 10px sans-serif"; ctx.textAlign = "right";
-            ctx.fillStyle = "#4ade80"; ctx.shadowColor = "#4ade80";
-            const _t = Date.now()/1000;
-            ctx.shadowBlur = 6 + (0.5 + 0.5*Math.sin(_t*(2*Math.PI/3))) * 4;
-            ctx.fillText("⚡ WINNOUGAN", this.size[0] - 28, 14);
-            ctx.restore();
+      // ⚡ WINNOUGAN badge
+      ctx.save();
+      ctx.font = "bold 10px sans-serif"; ctx.textAlign = "right";
+      ctx.fillStyle = "#4ade80"; ctx.shadowColor = "#4ade80";
+      const _t = Date.now()/1000;
+      ctx.shadowBlur = 6 + (0.5 + 0.5*Math.sin(_t*(2*Math.PI/3))) * 4;
+      ctx.fillText("⚡ WINNOUGAN", this.size[0] - 28, 14);
+      ctx.restore();
+
       const { TH, W, pad, iw, modeY, modeH, halfIw, contentY } = this._layout();
 
       ctx.save();
@@ -644,6 +655,7 @@ app.registerExtension({
         if (hit(b.x, b.y, b.w, b.h)) {
           showPresetDialog(this._presetLabel, p => {
             this._presetLabel = p.label;
+            this._syncWidgetValues();
             this.setDirtyCanvas(true);
           });
           return true;
@@ -665,6 +677,7 @@ app.registerExtension({
           if (hit(x, y, btnW, h)) {
             const next = Math.max(64, cur - 8);
             if (isW) this._customWidth = next; else this._customHeight = next;
+            this._syncWidgetValues();
             this.setDirtyCanvas(true); return true;
           }
           if (hit(valX, y, valW, h)) {
@@ -675,11 +688,13 @@ app.registerExtension({
                 if (isW) this._customWidth = n; else this._customHeight = n;
               }
             }
+            this._syncWidgetValues();
             this.setDirtyCanvas(true); return true;
           }
           if (hit(btnRX, y, btnW, h)) {
             const next = Math.min(8192, cur + 8);
             if (isW) this._customWidth = next; else this._customHeight = next;
+            this._syncWidgetValues();
             this.setDirtyCanvas(true); return true;
           }
         }
