@@ -14,6 +14,7 @@ import os
 
 import folder_paths
 import comfy.sd
+import comfy.utils
 
 log = logging.getLogger("Winnougan")
 
@@ -167,6 +168,23 @@ def _resolve_clip_type(clip_type_str):
     return val
 
 
+def _has_native_quant_metadata(state_dict: dict) -> bool:
+    """
+    Detect ComfyUI native quantization metadata (mxfp8, nvfp4, int8_rowwise).
+    These formats must NOT have custom dtype options injected — ComfyUI's
+    MixedPrecisionOps reads per-layer scales from metadata and handles
+    dequantization itself. Passing dtype overrides corrupts the output.
+    """
+    if "_quantization_metadata" in state_dict:
+        return True
+    # mxfp8 signature: fp8 weight tensors + uint8 scale tensors together
+    has_fp8   = any(isinstance(v, torch.Tensor) and v.dtype == torch.float8_e4m3fn
+                    for v in state_dict.values())
+    has_uint8 = any(isinstance(v, torch.Tensor) and v.dtype == torch.uint8
+                    for v in state_dict.values())
+    return has_fp8 and has_uint8
+
+
 def _load_one_clip(name, clip_type, dtype_str):
     """Load a single CLIP model, handling GGUF and all dtype variants."""
     is_gguf = name.lower().endswith(".gguf")
@@ -187,13 +205,36 @@ def _load_one_clip(name, clip_type, dtype_str):
     if path is None:
         raise FileNotFoundError(f"[{NODE_NAME}] Cannot find CLIP: {name}")
 
-    model_options = _dtype_model_options(dtype_str)
     resolved_type = _resolve_clip_type(clip_type)
+
+    # Load state dict and check for native quant metadata.
+    # _quantization_metadata is stored as a tensor key — must check state dict.
+    # Native quant files must be loaded via load_clip with path directly so
+    # ComfyUI routes through MixedPrecisionOps natively.
+    try:
+        sd = comfy.utils.load_torch_file(path, safe_load=True)
+        is_native = _has_native_quant_metadata(sd)
+        del sd
+    except Exception:
+        is_native = False
+
+    if is_native:
+        log.info(f"[{NODE_NAME}] Native quant metadata detected in '{name}' — using ComfyUI native path.")
+        clip = comfy.sd.load_clip(
+            ckpt_paths=[path],
+            embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            clip_type=resolved_type,
+            model_options={},
+        )
+        log.info(f"[{NODE_NAME}] Loaded CLIP: {name} [native quant]")
+        return clip
+
+    model_options = _dtype_model_options(dtype_str)
     clip = comfy.sd.load_clip(
-        ckpt_paths   = [path],
-        embedding_directory = folder_paths.get_folder_paths("embeddings"),
-        clip_type    = resolved_type,
-        model_options= model_options,
+        ckpt_paths=[path],
+        embedding_directory=folder_paths.get_folder_paths("embeddings"),
+        clip_type=resolved_type,
+        model_options=model_options,
     )
     log.info(f"[{NODE_NAME}] Loaded CLIP: {name} [{dtype_str}]")
     return clip
