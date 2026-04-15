@@ -371,14 +371,6 @@ app.registerExtension({
     nodeType.prototype.onNodeCreated = function () {
       orig?.call(this);
 
-      // Strip any native widgets
-      setTimeout(() => {
-        if (this.widgets?.length) {
-          this.widgets = [];
-          this.setDirtyCanvas(true, true);
-        }
-      }, 0);
-
       this.color   = "#1a2a1a";
       this.bgcolor = "#0f2a0f";
             this._sparkles = new SparkleSystem(14);
@@ -392,10 +384,25 @@ app.registerExtension({
       this._length       = 97;
       this._batchSize    = 1;
 
-      this.size = [310, 150];
+      // Hide underlying widgets — we draw our own UI over them
+      setTimeout(() => {
+        if (this.widgets?.length) {
+          this.widgets.forEach(w => {
+            w.type        = "hidden";
+            w.hidden      = true;
+            w.computeSize = () => [0, -4];
+          });
+          this._syncWidgetValues();
+          this.setSize(this.computeSize());
+          this.setDirtyCanvas(true, true);
+        }
+      }, 0);
+
+      this.size = [310, 130];
     };
 
     nodeType.prototype.onSerialize = function (o) {
+      this._syncWidgetValues();
       const { w, h } = this._resolvedDims();
       o.widgets_values = [w, h, this._length, this._batchSize];
       o.winnougan_ltx_res = {
@@ -410,7 +417,13 @@ app.registerExtension({
     };
 
     nodeType.prototype.onConfigure = function (o) {
-      if (this.widgets?.length) this.widgets = [];
+      if (this.widgets?.length) {
+        this.widgets.forEach(w => {
+          w.type        = "hidden";
+          w.hidden      = true;
+          w.computeSize = () => [0, -4];
+        });
+      }
       if (o.winnougan_ltx_res) {
         const r = o.winnougan_ltx_res;
         this._mode         = r.mode         ?? "preset";
@@ -421,6 +434,7 @@ app.registerExtension({
         this._length       = r.length       ?? 97;
         this._batchSize    = r.batchSize    ?? 1;
       }
+      this._syncWidgetValues();
       this.setDirtyCanvas(true);
     };
 
@@ -431,6 +445,15 @@ app.registerExtension({
         return { w: preset.w, h: preset.h };
       }
       return { w: this._customWidth, h: this._customHeight };
+    };
+
+    nodeType.prototype._syncWidgetValues = function () {
+      const { w, h } = this._resolvedDims();
+      const get = (name) => this.widgets?.find(ww => ww.name === name);
+      const ww = get("width");  if (ww) ww.value = w;
+      const wh = get("height"); if (wh) wh.value = h;
+      const wl = get("length"); if (wl) wl.value = this._length;
+      const wb = get("batch_size"); if (wb) wb.value = this._batchSize;
     };
 
     nodeType.prototype._layout = function () {
@@ -608,6 +631,7 @@ app.registerExtension({
           showPresetDialog(this._presetLabel, p => {
             this._presetLabel = p.label;
             this._presetSub   = p.sub;
+            this._syncWidgetValues();
             this.setDirtyCanvas(true);
           });
           return true;
