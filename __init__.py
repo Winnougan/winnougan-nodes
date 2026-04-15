@@ -4,25 +4,67 @@ from .winnougan_prompt_encoder import (
     NODE_CLASS_MAPPINGS as PROMPT_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as PROMPT_DISPLAY,
 )
+
 from .winnougan_clip_loader import (
     NODE_CLASS_MAPPINGS as CLIP_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as CLIP_DISPLAY,
 )
+
 from .winnougan_power_lora_loader import (
     NODE_CLASS_MAPPINGS as LORA_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as LORA_DISPLAY,
 )
+
 from .winnougan_resolution_picker import (
     NODE_CLASS_MAPPINGS as RES_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as RES_DISPLAY,
 )
+
 from .Winnougan_LTX_Resolution_Picker import (
     NODE_CLASS_MAPPINGS as LTX_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as LTX_DISPLAY,
 )
+
+# ✅ Checkpoint loader
 from .winnougan_checkpoint_loader import (
     NODE_CLASS_MAPPINGS as CKPT_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as CKPT_DISPLAY,
+)
+
+# ✅ Model loader
+from .winnougan_model_loader import (
+    NODE_CLASS_MAPPINGS as MODEL_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as MODEL_DISPLAY,
+)
+
+# ✅ KSampler
+from .winnougan_ksampler import (
+    NODE_CLASS_MAPPINGS as KSAMPLER_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as KSAMPLER_DISPLAY,
+)
+
+# ✅ Advanced Sampler
+from .winnougan_sampler_custom_advanced import (
+    NODE_CLASS_MAPPINGS as ADV_SAMPLER_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as ADV_SAMPLER_DISPLAY,
+)
+
+# ✅ Cache DiT (base)
+from .winnougan_cache_dit import (
+    NODE_CLASS_MAPPINGS as CACHE_DIT_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as CACHE_DIT_DISPLAY,
+)
+
+# ✅ Cache DiT LTX2
+from .winnougan_cache_dit_ltx2 import (
+    NODE_CLASS_MAPPINGS as CACHE_DIT_LTX2_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as CACHE_DIT_LTX2_DISPLAY,
+)
+
+# ✅ Cache DiT WAN
+from .winnougan_cache_dit_wan import (
+    NODE_CLASS_MAPPINGS as CACHE_DIT_WAN_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as CACHE_DIT_WAN_DISPLAY,
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -32,6 +74,12 @@ NODE_CLASS_MAPPINGS = {
     **RES_MAPPINGS,
     **LTX_MAPPINGS,
     **CKPT_MAPPINGS,
+    **MODEL_MAPPINGS,
+    **KSAMPLER_MAPPINGS,
+    **ADV_SAMPLER_MAPPINGS,
+    **CACHE_DIT_MAPPINGS,
+    **CACHE_DIT_LTX2_MAPPINGS,
+    **CACHE_DIT_WAN_MAPPINGS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -41,6 +89,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **RES_DISPLAY,
     **LTX_DISPLAY,
     **CKPT_DISPLAY,
+    **MODEL_DISPLAY,
+    **KSAMPLER_DISPLAY,
+    **ADV_SAMPLER_DISPLAY,
+    **CACHE_DIT_DISPLAY,
+    **CACHE_DIT_LTX2_DISPLAY,
+    **CACHE_DIT_WAN_DISPLAY,
 }
 
 WEB_DIRECTORY = "./js"
