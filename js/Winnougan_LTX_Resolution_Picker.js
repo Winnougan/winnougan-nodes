@@ -389,6 +389,7 @@ app.registerExtension({
       this._presetSub    = "LTX 720p Landscape";
       this._customWidth  = 1280;
       this._customHeight = 720;
+      this._length       = 97;
       this._batchSize    = 1;
 
       this.size = [310, 150];
@@ -396,13 +397,14 @@ app.registerExtension({
 
     nodeType.prototype.onSerialize = function (o) {
       const { w, h } = this._resolvedDims();
-      o.widgets_values = [w, h, this._batchSize];
+      o.widgets_values = [w, h, this._length, this._batchSize];
       o.winnougan_ltx_res = {
         mode:         this._mode,
         presetLabel:  this._presetLabel,
         presetSub:    this._presetSub,
         customWidth:  this._customWidth,
         customHeight: this._customHeight,
+        length:       this._length,
         batchSize:    this._batchSize,
       };
     };
@@ -416,6 +418,7 @@ app.registerExtension({
         this._presetSub    = r.presetSub    ?? "LTX 720p Landscape";
         this._customWidth  = r.customWidth  ?? 1280;
         this._customHeight = r.customHeight ?? 720;
+        this._length       = r.length       ?? 97;
         this._batchSize    = r.batchSize    ?? 1;
       }
       this.setDirtyCanvas(true);
@@ -502,8 +505,9 @@ app.registerExtension({
         roundRect(ctx, tx, ty, tw, th, 1, "#2a5a2a", "#5aaf5a", 0.8);
 
         // Resolution label + latent inline on same row
-        const lw = Math.floor(preset.w / 8);
-        const lh = Math.floor(preset.h / 8);
+        const lw = Math.floor(preset.w / 32);
+        const lh = Math.floor(preset.h / 32);
+        const lf = Math.floor((this._length - 1) / 8) + 1;
         ctx.textAlign    = "left";
         ctx.textBaseline = "middle";
         ctx.fillStyle    = "#e0e0e0";
@@ -511,7 +515,7 @@ app.registerExtension({
         ctx.fillText(preset.label, tx + tw + 8, contentY + btnH / 2 - 7);
         ctx.fillStyle = "#3a6a3a";
         ctx.font      = "9px monospace";
-        ctx.fillText(`latent ${lw}×${lh}`, tx + tw + 8, contentY + btnH / 2 + 7);
+        ctx.fillText(`${lf}f · ${lw}×${lh}`, tx + tw + 8, contentY + btnH / 2 + 7);
 
         ctx.fillStyle = "#4a7a4a";
         ctx.font      = "11px sans-serif";
@@ -531,13 +535,14 @@ app.registerExtension({
         this._drawDimRow(ctx, "WIDTH",  this._customWidth,  pad, wRowY, iw, rowH);
         this._drawDimRow(ctx, "HEIGHT", this._customHeight, pad, hRowY, iw, rowH);
 
-        const lw = Math.floor(this._customWidth  / 8);
-        const lh = Math.floor(this._customHeight / 8);
+        const lw = Math.floor(this._customWidth  / 32);
+        const lh = Math.floor(this._customHeight / 32);
+        const lf = Math.floor((this._length - 1) / 8) + 1;
         ctx.fillStyle    = "#3a6a3a";
         ctx.font         = "9px monospace";
         ctx.textAlign    = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(`latent ${lw}×${lh}`, W / 2, hRowY + rowH + 10);
+        ctx.fillText(`${lf}f · ${lw}×${lh}`, W / 2, hRowY + rowH + 10);
 
         this._dimRows = {
           w: { x: pad, y: wRowY, h: rowH },
@@ -622,17 +627,17 @@ app.registerExtension({
           const cur = isW ? this._customWidth : this._customHeight;
 
           if (hit(x, y, btnW, h)) {
-            const next = Math.max(64, cur - 8);
+            const next = Math.max(64, cur - 32);
             if (isW) this._customWidth = next; else this._customHeight = next;
             this.setDirtyCanvas(true); return true;
           }
           if (hit(valX, y, valW, h)) {
             const v = prompt(
-              `Enter ${isW ? "width" : "height"} (px, snapped to multiples of 8):`,
+              `Enter ${isW ? "width" : "height"} (px, snapped to multiples of 32):`,
               String(cur)
             );
             if (v !== null) {
-              const n = Math.round(parseInt(v) / 8) * 8;
+              const n = Math.round(parseInt(v) / 32) * 32;
               if (!isNaN(n) && n >= 64 && n <= 8192) {
                 if (isW) this._customWidth = n; else this._customHeight = n;
               }
@@ -640,7 +645,7 @@ app.registerExtension({
             this.setDirtyCanvas(true); return true;
           }
           if (hit(btnRX, y, btnW, h)) {
-            const next = Math.min(8192, cur + 8);
+            const next = Math.min(8192, cur + 32);
             if (isW) this._customWidth = next; else this._customHeight = next;
             this.setDirtyCanvas(true); return true;
           }
