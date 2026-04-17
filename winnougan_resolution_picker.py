@@ -14,20 +14,18 @@ class WinnouganResolutionPicker:
             "required": {},
             "optional": {
                 "width": ("INT", {
-                    "default":    1024,
-                    "min":        64,
-                    "max":        8192,
-                    "step":       8,
-                    "forceInput": True,
-                    "tooltip":    "Connect from outside to override width (subgraph / reroute).",
+                    "default": 1024,
+                    "min":     64,
+                    "max":     8192,
+                    "step":    8,
+                    "tooltip": "Width — set by the picker UI or connect from outside for subgraph override.",
                 }),
                 "height": ("INT", {
-                    "default":    1024,
-                    "min":        64,
-                    "max":        8192,
-                    "step":       8,
-                    "forceInput": True,
-                    "tooltip":    "Connect from outside to override height (subgraph / reroute).",
+                    "default": 1024,
+                    "min":     64,
+                    "max":     8192,
+                    "step":    8,
+                    "tooltip": "Height — set by the picker UI or connect from outside for subgraph override.",
                 }),
                 "batch_size": ("INT", {
                     "default": 1,
@@ -45,7 +43,7 @@ class WinnouganResolutionPicker:
 
     def pick_resolution(self, width=1024, height=1024, batch_size=1):
         import logging
-        logging.getLogger("Winnougan").warning(
+        logging.getLogger("Winnougan").info(
             f"[Resolution Picker] width={width}, height={height}, batch={batch_size}"
         )
         latent = torch.zeros(
