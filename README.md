@@ -1,4 +1,4 @@
-<img width="1200" height="1200" alt="Logo_Winnougan" src="https://github.com/user-attachments/assets/a21cd7e7-d52e-4935-ae2a-ff111f439ca8" />
+<img width="687" height="687" alt="download (15)" src="https://github.com/user-attachments/assets/bdb2438c-c654-4df0-8495-24334087fa1c" />
 
 Winnougan Nodes for ComfyUI
 A suite of high-quality custom nodes for ComfyUI, split into two families: the Winnougan general-purpose nodes and the WINT8 INT8-optimized nodes for quantized model inference.
