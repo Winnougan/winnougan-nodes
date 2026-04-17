@@ -10,6 +10,12 @@ from .winnougan_clip_loader import (
     NODE_DISPLAY_NAME_MAPPINGS as CLIP_DISPLAY,
 )
 
+# ✅ Anima CLIP Loader (ADDED)
+from .winnougan_anima_clip_loader import (
+    NODE_CLASS_MAPPINGS as ANIMA_CLIP_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as ANIMA_CLIP_DISPLAY,
+)
+
 from .winnougan_power_lora_loader import (
     NODE_CLASS_MAPPINGS as LORA_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as LORA_DISPLAY,
@@ -75,6 +81,7 @@ from .winnougan_cache_cleanup import (
 NODE_CLASS_MAPPINGS = {
     **PROMPT_MAPPINGS,
     **CLIP_MAPPINGS,
+    **ANIMA_CLIP_MAPPINGS,  # ✅ ADDED
     **LORA_MAPPINGS,
     **RES_MAPPINGS,
     **LTX_MAPPINGS,
@@ -91,6 +98,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     **PROMPT_DISPLAY,
     **CLIP_DISPLAY,
+    **ANIMA_CLIP_DISPLAY,  # ✅ ADDED
     **LORA_DISPLAY,
     **RES_DISPLAY,
     **LTX_DISPLAY,
