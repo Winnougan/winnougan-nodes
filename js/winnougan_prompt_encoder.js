@@ -61,7 +61,7 @@ function drawDualGlow(ctx, node, sparkles, dividerBodyY) {
     ctx.shadowBlur=6+pulse2*8; ctx.globalAlpha=0.50+pulse2*0.30;
     ctx.lineWidth=1.5; ctx.strokeStyle="#6aefa0";
     ctx.beginPath(); ctx.roundRect(1,yOff+1,W-2,H-2,r); ctx.stroke();
-    // Red accent below divider (convert body Y to draw Y)
+    // Red accent below divider
     const drawMid = yOff + LiteGraph.NODE_TITLE_HEIGHT + bodyMid;
     ctx.shadowColor="#dd2244"; ctx.shadowBlur=20+pulse*22; ctx.strokeStyle="#dd2244";
     ctx.lineWidth=1.5; ctx.globalAlpha=0.18+pulse*0.20;
@@ -90,8 +90,6 @@ function drawDivider(ctx, W, bodyY) {
 }
 
 // ── Custom label widget factory ───────────────────────────────────────────────
-// A zero-interaction widget that just renders a coloured label row.
-// Height is fixed so LiteGraph reserves exact space for it in the flow.
 function makeLabelWidget(name, text, color, height = 20) {
     return {
         name,
@@ -99,7 +97,6 @@ function makeLabelWidget(name, text, color, height = 20) {
         value:    text,
         _color:   color,
         _height:  height,
-        // LiteGraph calls draw() on each widget
         draw(ctx, node, widgetWidth, y, H) {
             ctx.save();
             ctx.font         = "bold 9px sans-serif";
@@ -112,9 +109,7 @@ function makeLabelWidget(name, text, color, height = 20) {
             ctx.restore();
         },
         computeSize(width) { return [width, this._height]; },
-        // No mouse interaction
         mouse() { return false; },
-        // Serialize as nothing — labels are reconstructed from code
         serializeValue() { return undefined; },
     };
 }
@@ -125,7 +120,7 @@ function makeDividerWidget() {
         name:    "_winnougan_divider",
         type:    "WINNOUGAN_DIVIDER",
         value:   null,
-        _divY:   null,   // filled in during draw, used by background pass
+        _divY:   null,
         draw(ctx, node, widgetWidth, y, H) {
             this._divY = y + H / 2;
             drawDivider(ctx, widgetWidth, y + H / 2);
@@ -136,6 +131,61 @@ function makeDividerWidget() {
     };
 }
 
+// ── Core setup: inject decorative widgets and wire zero_neg callback ──────────
+// Called once on creation and once after configure (if not already injected).
+// Accepts optional savedZeroNeg so we can restore toggle state without relying
+// on the widget's .value being set yet (it may not be during onConfigure).
+function _injectWidgets(node, savedZeroNeg) {
+    const getW = (name) => node.widgets?.find(ww => ww.name === name);
+
+    // Guard: if already injected, just sync state and bail
+    if (getW("_pos_label")) {
+        _applyZeroNeg(node, savedZeroNeg ?? getW("zero_neg")?.value ?? false);
+        return;
+    }
+
+    const posW  = getW("positive");
+    const negW  = getW("negative");
+    const zeroW = getW("zero_neg");
+    if (!posW || !negW || !zeroW) return;
+
+    const posLabel = makeLabelWidget("_pos_label", "▲  POSITIVE", "#4ade80", 18);
+    const dividerW = makeDividerWidget();
+    const negLabel = makeLabelWidget("_neg_label", "▼  NEGATIVE", "#f87171", 18);
+
+    node._negLabel = negLabel;
+    node._dividerW = dividerW;
+
+    // Rebuild widget array in desired order — preserving the real widget
+    // objects so their .value references stay intact and ComfyUI serializes
+    // them correctly.
+    node.widgets = [posLabel, posW, dividerW, negLabel, negW, zeroW];
+
+    // Apply initial zero_neg visual state
+    _applyZeroNeg(node, savedZeroNeg ?? zeroW.value ?? false);
+
+    // Hook the toggle — only once
+    if (!zeroW._winnougan_hooked) {
+        zeroW._winnougan_hooked = true;
+        const origCb = zeroW.callback;
+        zeroW.callback = (val) => {
+            _applyZeroNeg(node, val);
+            origCb?.call(zeroW, val);
+        };
+    }
+
+    node.setSize(node.computeSize());
+    app.graph.setDirtyCanvas(true, true);
+}
+
+function _applyZeroNeg(node, val) {
+    if (!node._negLabel) return;
+    node._negLabel.value  = val ? "▽  NEGATIVE  (zeroed out)" : "▼  NEGATIVE";
+    node._negLabel._color = val ? "#666666" : "#f87171";
+    const negW = node.widgets?.find(ww => ww.name === "negative");
+    if (negW) negW.disabled = val;
+}
+
 // ── Extension ─────────────────────────────────────────────────────────────────
 app.registerExtension({
     name: "Winnougan.PromptEncoder",
@@ -143,57 +193,54 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;
 
+        // ── onNodeCreated ─────────────────────────────────────────────────────
+        // Fired when a brand-new node is dropped onto the canvas.
+        // At this point widgets exist and have default values — safe to inject
+        // synchronously with no setTimeout.
         const origCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             origCreated?.call(this);
-
             this.color     = "#1a2a1a";
             this.bgcolor   = "#0f1f0f";
             this._sparkles = new SparkleSystem(16);
             this.title     = "✍️ Winnougan Prompt Encoder";
+            _injectWidgets(this);
+        };
 
-            const getW = (name) => this.widgets?.find(ww => ww.name === name);
+        // ── onConfigure ───────────────────────────────────────────────────────
+        // Fired when a saved workflow is loaded OR when ComfyUI rebuilds the
+        // node after a tab switch.  At this point ComfyUI has already written
+        // widgets_values back onto the widgets, so we must NOT overwrite them.
+        // We pass the serialized zero_neg value explicitly so _applyZeroNeg
+        // uses the correct saved state rather than whatever default the widget
+        // happens to have at call time.
+        const origConfigure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function (data) {
+            origConfigure?.call(this, data);
 
-            // ── Inject label + divider widgets into the widget list ───────────
-            // Widget order from Python: positive(0), negative(1), zero_neg(2)
-            // We want:  [posLabel] [positive] [dividerW] [negLabel] [negative] [zero_neg]
-            setTimeout(() => {
-                const posW   = getW("positive");
-                const negW   = getW("negative");
-                const zeroW  = getW("zero_neg");
-                if (!posW || !negW || !zeroW) return;
+            this.color     = this.color     ?? "#1a2a1a";
+            this.bgcolor   = this.bgcolor   ?? "#0f1f0f";
+            this._sparkles = this._sparkles ?? new SparkleSystem(16);
+            this.title     = "✍️ Winnougan Prompt Encoder";
 
-                const posLabel  = makeLabelWidget("_pos_label",  "▲  POSITIVE", "#4ade80", 18);
-                const dividerW  = makeDividerWidget();
-                const negLabel  = makeLabelWidget("_neg_label",  "▼  NEGATIVE", "#f87171", 18);
+            // Recover the saved zero_neg value from widgets_values.
+            // Python INPUT_TYPES order: positive(0), negative(1), zero_neg(2)
+            // widgets_values is written in that same order by ComfyUI.
+            const savedZeroNeg = data?.widgets_values?.[2] ?? false;
 
-                // Store refs for later (zero_neg toggle updates negLabel text)
-                this._negLabel  = negLabel;
-                this._dividerW  = dividerW;
+            // Strip any previously-injected decorative widgets so _injectWidgets
+            // can rebuild cleanly without duplicating them.  We must preserve
+            // the real widgets' current .value (already restored by ComfyUI).
+            if (this.widgets) {
+                this.widgets = this.widgets.filter(
+                    w => !["_pos_label", "_winnougan_divider", "_neg_label"].includes(w.name)
+                );
+            }
+            // Clear stale refs so _injectWidgets knows to rebuild
+            this._negLabel = null;
+            this._dividerW = null;
 
-                // Rebuild widget array in desired order
-                this.widgets = [posLabel, posW, dividerW, negLabel, negW, zeroW];
-
-                this.setSize(this.computeSize());
-                app.graph.setDirtyCanvas(true, true);
-
-                // Wire zero_neg toggle
-                const origCb = zeroW.callback;
-                zeroW.callback = (val) => {
-                    this._negLabel.value    = val ? "▽  NEGATIVE  (zeroed out)" : "▼  NEGATIVE";
-                    this._negLabel._color   = val ? "#666666" : "#f87171";
-                    const negWw = this.widgets?.find(ww => ww.name === "negative");
-                    if (negWw) negWw.disabled = val;
-                    app.graph.setDirtyCanvas(true, true);
-                    origCb?.call(zeroW, val);
-                };
-                // Apply initial state
-                if (zeroW.value) {
-                    negLabel.value  = "▽  NEGATIVE  (zeroed out)";
-                    negLabel._color = "#666666";
-                    if (negW) negW.disabled = true;
-                }
-            }, 0);
+            _injectWidgets(this, savedZeroNeg);
         };
 
         // ── Background ────────────────────────────────────────────────────────
@@ -201,7 +248,6 @@ app.registerExtension({
         nodeType.prototype.onDrawBackground = function (ctx) {
             origBg?.call(this, ctx);
             if (!this._sparkles) this._sparkles = new SparkleSystem(16);
-            // Pass divider body-Y to glow so red accent starts at the right place
             const divY = this._dividerW?._divY ?? null;
             drawDualGlow(ctx, this, this._sparkles, divY);
         };
@@ -222,10 +268,7 @@ app.registerExtension({
             ctx.shadowColor="#4ade80"; ctx.shadowBlur=6;
             ctx.fillText("⚡ WINNOUGAN", W-76, 14);
 
-            // COND ZERO OUT pill — drawn next to the neg label widget
-            if (isZero && this._negLabel?._divY != null) {
-                // use divider Y as anchor — pill sits just below it
-            }
+            // COND ZERO OUT pill
             if (isZero) {
                 const negLabelW = getW("_neg_label");
                 if (negLabelW?.last_y != null) {
@@ -248,60 +291,17 @@ app.registerExtension({
 
         // ── computeSize ───────────────────────────────────────────────────────
         nodeType.prototype.computeSize = function () {
-            // Let LiteGraph measure actual widget heights and sum them
             const W = 360;
             if (!this.widgets?.length) return [W, 300];
             let h = LiteGraph.NODE_TITLE_HEIGHT + 4;
-            // Add slot rows
             const slotH = LiteGraph.NODE_SLOT_HEIGHT ?? 20;
             h += Math.max(this.inputs?.length ?? 0, this.outputs?.length ?? 0) * slotH;
             for (const ww of this.widgets) {
                 const [, wh] = ww.computeSize ? ww.computeSize(W) : [W, LiteGraph.NODE_WIDGET_HEIGHT ?? 20];
                 h += wh + 4;
             }
-            h += 12; // bottom padding
+            h += 12;
             return [W, Math.max(h, 280)];
-        };
-
-        // ── onConfigure: re-inject labels after loading from saved workflow ───
-        nodeType.prototype.onConfigure = function (data) {
-            // Wait for normal configure to finish, then reorder widgets
-            setTimeout(() => {
-                const getW  = (name) => this.widgets?.find(ww => ww.name === name);
-                // Only inject if not already done
-                if (getW("_pos_label")) return;
-                const posW  = getW("positive");
-                const negW  = getW("negative");
-                const zeroW = getW("zero_neg");
-                if (!posW || !negW || !zeroW) return;
-
-                const posLabel = makeLabelWidget("_pos_label", "▲  POSITIVE", "#4ade80", 18);
-                const dividerW = makeDividerWidget();
-                const negLabel = makeLabelWidget("_neg_label", "▼  NEGATIVE", "#f87171", 18);
-                this._negLabel = negLabel;
-                this._dividerW = dividerW;
-                this.widgets   = [posLabel, posW, dividerW, negLabel, negW, zeroW];
-
-                if (zeroW.value) {
-                    negLabel.value  = "▽  NEGATIVE  (zeroed out)";
-                    negLabel._color = "#666666";
-                    if (negW) negW.disabled = true;
-                }
-                const origCb = zeroW.callback;
-                if (!zeroW._winnougan_hooked) {
-                    zeroW._winnougan_hooked = true;
-                    zeroW.callback = (val) => {
-                        this._negLabel.value  = val ? "▽  NEGATIVE  (zeroed out)" : "▼  NEGATIVE";
-                        this._negLabel._color = val ? "#666666" : "#f87171";
-                        const negWw = this.widgets?.find(ww => ww.name === "negative");
-                        if (negWw) negWw.disabled = val;
-                        app.graph.setDirtyCanvas(true, true);
-                        origCb?.call(zeroW, val);
-                    };
-                }
-                this.setSize(this.computeSize());
-                app.graph.setDirtyCanvas(true, true);
-            }, 50);
         };
     },
 });
