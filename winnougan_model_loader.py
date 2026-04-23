@@ -435,18 +435,38 @@ class WinnouganModelLoader:
             log.info(f"[{NODE_NAME}] Loaded: {model_name} [{weight_dtype}]")
 
         # ── SageAttention ─────────────────────────────────────────────────────
+        # GGUF models keep their weights quantized in memory and dequantize
+        # per-operation via ComfyUI-GGUF's own kernels.  Layering a custom
+        # sageattn kernel on top forces every attention call to dequantize
+        # *again* through a second code path, stalling generation to a crawl.
+        # SageAttention only makes sense on fully-loaded fp16/bf16/fp8 models.
         if sage_attention != "disabled":
-            try:
-                model = _patch_sage_attention(model, sage_attention)
-            except Exception as e:
-                log.error(f"[{NODE_NAME}] SageAttention failed: {e}")
+            if loader_type == "GGUF":
+                log.warning(
+                    f"[{NODE_NAME}] SageAttention is not compatible with GGUF models "
+                    "and has been skipped. Use a diffusion_model (safetensors) if you "
+                    "need SageAttention."
+                )
+            else:
+                try:
+                    model = _patch_sage_attention(model, sage_attention)
+                except Exception as e:
+                    log.error(f"[{NODE_NAME}] SageAttention failed: {e}")
 
         # ── FluxKVCache ───────────────────────────────────────────────────────
+        # Same reasoning: KV cache concat operations on dequantized-on-the-fly
+        # tensors produce excessive overhead with GGUF.
         if flux_kv_cache:
-            try:
-                model = _apply_flux_kv_cache(model)
-            except Exception as e:
-                log.error(f"[{NODE_NAME}] FluxKVCache failed: {e}")
+            if loader_type == "GGUF":
+                log.warning(
+                    f"[{NODE_NAME}] FluxKVCache is not compatible with GGUF models "
+                    "and has been skipped."
+                )
+            else:
+                try:
+                    model = _apply_flux_kv_cache(model)
+                except Exception as e:
+                    log.error(f"[{NODE_NAME}] FluxKVCache failed: {e}")
 
         return (model,)
 
