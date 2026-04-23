@@ -169,35 +169,62 @@ app.registerExtension({
             // Init sparkle system per node instance
             this._sparkles = new SparkleSystem(14);
 
-            // Cache the full combined model list from the combo widget
             const modelWidget      = this.widgets?.find(w => w.name === "model_name");
             const loaderTypeWidget = this.widgets?.find(w => w.name === "loader_type");
 
             if (modelWidget && loaderTypeWidget) {
+                // Snapshot the full list once — never mutate this copy
                 if (!this._allModelNames) {
                     this._allModelNames = [...(modelWidget.options?.values ?? [])];
                 }
 
-                const applyFilter = (loaderType) => {
-                    const all      = this._allModelNames;
+                // FIX 2: applyFilter now accepts an explicit currentValue so it
+                // can always preserve whatever the widget holds — including a
+                // restored value that was set by ComfyUI before our callback ran.
+                // It NEVER overwrites modelWidget.value if the value is still
+                // valid in the unfiltered master list (i.e. it truly belongs to
+                // this loader type).  This prevents the red-error-on-reload.
+                const applyFilter = (loaderType, currentValue) => {
+                    const all = this._allModelNames;
                     const filtered = loaderType === "GGUF"
                         ? all.filter(isGguf)
                         : all.filter(m => !isGguf(m));
 
-                    modelWidget.options.values = filtered.length ? filtered : all;
+                    // Always keep the full master list as the source of truth so
+                    // ComfyUI's own serialisation/restore never sees a value that
+                    // isn't in options.values.
+                    modelWidget.options.values = [...all];
 
-                    if (!filtered.includes(modelWidget.value)) {
-                        modelWidget.value = filtered[0] ?? modelWidget.value;
+                    // Determine what the visible selection should be
+                    const target = currentValue ?? modelWidget.value;
+
+                    if (filtered.includes(target)) {
+                        // The saved/current value is valid for this loader type —
+                        // keep it exactly as-is.
+                        modelWidget.value = target;
+                    } else if (filtered.length > 0) {
+                        // The saved value belongs to the other loader type — pick
+                        // the first match from the correct category.
+                        modelWidget.value = filtered[0];
                     }
+                    // (If filtered is empty we leave modelWidget.value alone.)
 
                     app.graph.setDirtyCanvas(true);
                 };
 
-                applyFilter(loaderTypeWidget.value);
+                // FIX 2: Defer the initial filter until after the graph has
+                // finished restoring all widget values from the saved workflow.
+                // Without this, applyFilter fires before modelWidget.value is
+                // populated by the restore, so it always resets to filtered[0].
+                setTimeout(() => {
+                    applyFilter(loaderTypeWidget.value, modelWidget.value);
+                }, 0);
 
                 const origCallback = loaderTypeWidget.callback;
                 loaderTypeWidget.callback = (value) => {
-                    applyFilter(value);
+                    // When the user manually switches loader type, use whatever
+                    // modelWidget.value currently holds as the starting point.
+                    applyFilter(value, modelWidget.value);
                     origCallback?.call(loaderTypeWidget, value);
                 };
             }
