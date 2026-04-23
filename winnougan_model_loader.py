@@ -84,7 +84,6 @@ def _find_gguf_nodes_module():
 
     # ── Stage 1: sys.modules scan, strict class check ─────────────────────────
     for key in list(sys.modules.keys()):
-        # Only look at modules whose key suggests GGUF origin
         if "gguf" not in key.lower():
             continue
         mod = sys.modules.get(key)
@@ -96,12 +95,10 @@ def _find_gguf_nodes_module():
             return mod
 
     # ── Stage 2: disk scan — most reliable ───────────────────────────────────
-    # Build the list of custom_nodes directories to search
     custom_dirs = []
     info = folder_paths.folder_names_and_paths.get("custom_nodes")
     if info:
         custom_dirs.extend(info[0])
-    # winnougan_nodes sits inside custom_nodes, so go one level up from this file
     parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if parent not in custom_dirs:
         custom_dirs.append(parent)
@@ -115,7 +112,6 @@ def _find_gguf_nodes_module():
             nodes_py = os.path.join(base, dirname, "nodes.py")
             if not os.path.isfile(nodes_py):
                 continue
-            # Use a stable module name so it isn't re-executed on every call
             mod_name = f"_winnougan_gguf_nodes"
             if mod_name in sys.modules:
                 mod = sys.modules[mod_name]
@@ -125,14 +121,14 @@ def _find_gguf_nodes_module():
             try:
                 spec = importlib.util.spec_from_file_location(mod_name, nodes_py)
                 mod  = importlib.util.module_from_spec(spec)
-                sys.modules[mod_name] = mod          # cache before exec to handle circular imports
+                sys.modules[mod_name] = mod
                 spec.loader.exec_module(mod)
                 candidate = getattr(mod, "UnetLoaderGGUF", None)
                 if _is_real_class(candidate, "UnetLoaderGGUF"):
                     log.info(f"[{NODE_NAME}] Loaded GGUF nodes from disk: {nodes_py}")
                     return mod
                 else:
-                    del sys.modules[mod_name]        # didn't have what we need
+                    del sys.modules[mod_name]
             except Exception as e:
                 sys.modules.pop(mod_name, None)
                 log.warning(f"[{NODE_NAME}] Could not load {nodes_py}: {e}")
@@ -164,6 +160,84 @@ def _resolve_model_path(model_name, *extra_keys):
         except Exception:
             pass
     return None
+
+
+# ── GGUF load_unet caller ─────────────────────────────────────────────────────
+
+# FIX 1: Cache the GGUF API variant so we only probe once, not on every load.
+_gguf_api_variant = None   # "new" | "string" | "none"
+
+def _detect_gguf_api_variant(gguf_cls):
+    """
+    Inspect the load_unet signature WITHOUT instantiating the class.
+    Returns "new", "string", or "none".
+    """
+    import inspect
+    try:
+        # inspect.signature on an unbound method — no instantiation needed
+        sig = inspect.signature(gguf_cls.load_unet)
+        return "new" if "dequant_dtype" in sig.parameters else "none"
+    except Exception:
+        return "none"
+
+
+def _load_gguf_model(gguf_cls, model_name, weight_dtype_str):
+    """
+    Call UnetLoaderGGUF.load_unet robustly across ComfyUI-GGUF versions.
+
+    FIX 1: Instantiate gguf_cls exactly ONCE per call.
+    FIX 1: Detect the API variant via class-level signature inspection (no
+            premature instantiation) and cache the result globally so the probe
+            only runs once per session, not on every generation.
+    """
+    import torch
+
+    global _gguf_api_variant
+
+    dtype_map = {
+        "default":         None,
+        "fp8_e4m3fn":      torch.float8_e4m3fn,
+        "fp8_e4m3fn_fast": torch.float8_e4m3fn,
+        "fp8_e5m2":        torch.float8_e5m2,
+        "fp16":            torch.float16,
+        "bf16":            torch.bfloat16,
+    }
+    torch_dtype = dtype_map.get(weight_dtype_str, None)
+
+    # Probe the API once per session
+    if _gguf_api_variant is None:
+        _gguf_api_variant = _detect_gguf_api_variant(gguf_cls)
+        log.info(f"[{NODE_NAME}] GGUF API variant detected: {_gguf_api_variant}")
+
+    # Instantiate exactly once
+    loader = gguf_cls()
+
+    if _gguf_api_variant == "new":
+        # New API: dequant_dtype accepts torch.dtype or None
+        try:
+            result = loader.load_unet(model_name, dequant_dtype=torch_dtype)
+            log.info(f"[{NODE_NAME}] Loaded GGUF (new API, dtype={torch_dtype}): {model_name}")
+            return result[0]
+        except TypeError as e:
+            # The installed version rejects torch.dtype — downgrade and retry
+            log.warning(f"[{NODE_NAME}] GGUF new API rejected torch.dtype ({e}), "
+                        "falling back to string API")
+            _gguf_api_variant = "string"
+
+    if _gguf_api_variant == "string":
+        try:
+            result = loader.load_unet(model_name, dequant_dtype=weight_dtype_str)
+            log.info(f"[{NODE_NAME}] Loaded GGUF (string API): {model_name}")
+            return result[0]
+        except Exception as e:
+            log.warning(f"[{NODE_NAME}] GGUF string API failed ({e}), "
+                        "trying no-dtype fallback")
+            _gguf_api_variant = "none"
+
+    # Last resort: no dequant_dtype at all
+    result = loader.load_unet(model_name)
+    log.info(f"[{NODE_NAME}] Loaded GGUF (no-dtype API): {model_name}")
+    return result[0]
 
 
 # ── SageAttention patcher ─────────────────────────────────────────────────────
@@ -262,14 +336,12 @@ def _apply_flux_kv_cache(model):
         import torch
         m = model.clone()
 
-        # Use a list so the closure can rebind it
         _cache_ref = [None]
 
         def kv_cache_pre_attn(q, k, v, pe=None, extra_options=None, **kwargs):
             opts = extra_options or {}
             bid  = opts.get("block", (0, 0))
 
-            # block 0 = start of a new forward pass — reset the per-pass cache
             if bid == (0, 0) or bid == 0:
                 _cache_ref[0] = {}
 
@@ -279,10 +351,8 @@ def _apply_flux_kv_cache(model):
                 _cache_ref[0] = cache
 
             if bid not in cache:
-                # First time seeing this block this pass — store original k/v
                 cache[bid] = (k.detach(), v.detach())
             else:
-                # Subsequent passes — prepend cached k/v
                 kc, vc = cache[bid]
                 k = torch.cat([kc, k], dim=1)
                 v = torch.cat([vc, v], dim=1)
@@ -309,7 +379,7 @@ class WinnouganModelLoader:
     @classmethod
     def INPUT_TYPES(cls):
         std, gguf = _get_all_model_files()
-        combined  = std + gguf  # std first, GGUF at bottom; JS filters per loader_type
+        combined  = std + gguf
         return {
             "required": {
                 "model_name":     (combined,),
@@ -329,17 +399,6 @@ class WinnouganModelLoader:
     def load_model(self, model_name, loader_type, weight_dtype,
                    sage_attention, flux_kv_cache):
 
-        import torch
-        dtype_map = {
-            "default":         None,
-            "fp8_e4m3fn":      torch.float8_e4m3fn,
-            "fp8_e4m3fn_fast": torch.float8_e4m3fn,
-            "fp8_e5m2":        torch.float8_e5m2,
-            "fp16":            torch.float16,
-            "bf16":            torch.bfloat16,
-        }
-        dtype = dtype_map.get(weight_dtype, None)
-
         # ── Load ──────────────────────────────────────────────────────────────
         if loader_type == "GGUF":
             gguf_cls = get_gguf_loader()
@@ -348,14 +407,20 @@ class WinnouganModelLoader:
                     f"[{NODE_NAME}] ComfyUI-GGUF is not installed or could not be found. "
                     "Install it from: https://github.com/city96/ComfyUI-GGUF"
                 )
-            try:
-                result = gguf_cls().load_unet(model_name)
-            except TypeError:
-                result = gguf_cls().load_unet(model_name, dequant_dtype=weight_dtype)
-            model = result[0]
-            log.info(f"[{NODE_NAME}] Loaded GGUF: {model_name}")
+            model = _load_gguf_model(gguf_cls, model_name, weight_dtype)
 
         else:
+            import torch
+            dtype_map = {
+                "default":         None,
+                "fp8_e4m3fn":      torch.float8_e4m3fn,
+                "fp8_e4m3fn_fast": torch.float8_e4m3fn,
+                "fp8_e5m2":        torch.float8_e5m2,
+                "fp16":            torch.float16,
+                "bf16":            torch.bfloat16,
+            }
+            dtype = dtype_map.get(weight_dtype, None)
+
             model_path = _resolve_model_path(model_name)
             if model_path is None:
                 raise FileNotFoundError(

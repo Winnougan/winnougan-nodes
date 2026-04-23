@@ -18,60 +18,90 @@ log = logging.getLogger("Winnougan")
 NODE_NAME = "Winnougan Checkpoint Loader"
 
 
-# ── Sage Attention helpers (shared pattern with WINT8) ────────────────────────
+# ── Sage Attention ────────────────────────────────────────────────────────────
+#
+# FIX: The original implementation patched comfy.ldm.modules.attention
+# .optimized_attention globally, meaning it affected every node in the graph.
+# Two nodes with different sage settings would fight each other, and calling
+# _disable_sage_attention() would silently undo sage for every other model
+# loaded in the same session.
+#
+# The correct approach — matching ComfyUI's own extension pattern and what
+# WinnouganModelLoader already does — is to attach the patch to the model
+# object via model_options["transformer_options"], so it is scoped to this
+# model only and travels with it through the graph.
 
-def _try_enable_sage_attention():
+def _build_sage_func():
+    """
+    Import sageattn and return a wrapped attention callable, or None on failure.
+    Mirrors the "auto" branch of WinnouganModelLoader._build_sage_func.
+    """
     try:
-        import comfy.ldm.modules.attention as attn_mod
-        from sageattn import sageattn as _sageattn
+        from sageattention import sageattn
 
-        if getattr(attn_mod, "_orig_attn_winnougan", None) is not None:
-            return True  # already patched
+        def f(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
+            return sageattn(q, k, v, is_causal=is_causal,
+                            attn_mask=attn_mask, tensor_layout=tensor_layout)
 
-        _orig = attn_mod.optimized_attention
-
-        def _sage(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False):
-            try:
-                import torch
-                B, S, _ = q.shape
-                D = q.shape[-1] // heads
-                q_ = q.view(B, S, heads, D).transpose(1, 2).contiguous()
-                k_ = k.view(B, S, heads, D).transpose(1, 2).contiguous()
-                v_ = v.view(B, S, heads, D).transpose(1, 2).contiguous()
-                out = _sageattn(q_, k_, v_, tensor_layout="HND", is_causal=False)
-                return out.transpose(1, 2).reshape(B, S, heads * D)
-            except Exception:
-                return _orig(q, k, v, heads, mask, attn_precision, skip_reshape)
-
-        attn_mod._orig_attn_winnougan = _orig
-        attn_mod.optimized_attention  = _sage
-        log.info(f"[{NODE_NAME}] Sage Attention enabled.")
-        return True
+        return f
     except ImportError:
-        log.warning(f"[{NODE_NAME}] sageattn not installed — Sage Attention skipped.")
-        return False
+        log.warning(f"[{NODE_NAME}] sageattention not installed — Sage Attention skipped.")
+        return None
+    except Exception as e:
+        log.warning(f"[{NODE_NAME}] sageattention import failed: {e}")
+        return None
+
+
+def _patch_sage_attention(model):
+    """
+    Clone the model and attach a per-model sage attention patch via
+    transformer_options.  Does NOT touch any global comfy module state.
+    Returns the patched clone, or the original model on failure.
+    """
+    import torch
+
+    sage_func = _build_sage_func()
+    if sage_func is None:
+        return model
+
+    def attention_sage(q, k, v, heads, mask=None, attn_precision=None,
+                       skip_reshape=False, skip_output_reshape=False,
+                       transformer_options=None):
+        if not skip_reshape:
+            b, _, dim_head = q.shape
+            dim_head = dim_head // heads
+            q = q.view(b, -1, heads, dim_head)
+            k = k.view(b, -1, heads, dim_head)
+            v = v.view(b, -1, heads, dim_head)
+        dt = q.dtype
+        out = sage_func(
+            q.to(torch.float16),
+            k.to(torch.float16),
+            v.to(torch.float16),
+            tensor_layout="NHD",
+        )
+        out = out.to(dt)
+        if not skip_output_reshape:
+            b, s, h, d = out.shape
+            out = out.reshape(b, s, h * d)
+        return out
+
+    try:
+        m = model.clone()
+        m.model_options = (m.model_options.copy() if hasattr(m, "model_options") else {})
+        m.model_options.setdefault("transformer_options", {})
+        m.model_options["transformer_options"]["patch_attn1_replace"] = attention_sage
+        log.info(f"[{NODE_NAME}] Sage Attention patched on model.")
+        return m
     except Exception as e:
         log.warning(f"[{NODE_NAME}] Sage Attention patch failed: {e}")
-        return False
-
-
-def _disable_sage_attention():
-    try:
-        import comfy.ldm.modules.attention as attn_mod
-        orig = getattr(attn_mod, "_orig_attn_winnougan", None)
-        if orig is not None:
-            attn_mod.optimized_attention = orig
-            del attn_mod._orig_attn_winnougan
-            log.info(f"[{NODE_NAME}] Sage Attention disabled.")
-    except Exception:
-        pass
+        return model
 
 
 def _try_enable_triton():
     """Enable Triton-accelerated kernels in ComfyUI where possible."""
     try:
         import triton  # noqa: F401
-        # Signal to our wint8_quant kernels that triton is available
         try:
             from wint8_nodes import wint8_fused_kernel  # noqa: F401
             log.info(f"[{NODE_NAME}] Triton kernels available.")
@@ -114,12 +144,6 @@ class WinnouganCheckpointLoader:
     FUNCTION      = "load_checkpoint"
 
     def load_checkpoint(self, ckpt_name, sage_attention, triton):
-        # ── Sage Attention ────────────────────────────────────────────────────
-        if sage_attention:
-            _try_enable_sage_attention()
-        else:
-            _disable_sage_attention()
-
         # ── Triton ────────────────────────────────────────────────────────────
         if triton:
             _try_enable_triton()
@@ -136,6 +160,10 @@ class WinnouganCheckpointLoader:
         model = out[0]
         clip  = out[1]
         vae   = out[2]
+
+        # ── Sage Attention — applied per-model, not globally ──────────────────
+        if sage_attention:
+            model = _patch_sage_attention(model)
 
         log.info(
             f"[{NODE_NAME}] Loaded '{ckpt_name}' | "
