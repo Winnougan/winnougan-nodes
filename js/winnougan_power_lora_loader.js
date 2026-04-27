@@ -516,7 +516,25 @@ class PowerLoraWidget {
     ctx.fillStyle   = LiteGraph.WIDGET_TEXT_COLOR ?? "#ccc";
     ctx.textBaseline = "middle";
 
-    let rposX = widgetWidth - margin - im;
+    // ── Remove button (✕) on the far right ─────────────────────────────────
+    const removeSize = height * 0.75;
+    const removeX    = widgetWidth - margin - removeSize;
+    const removeY    = posY + (height - removeSize) / 2;
+    ctx.beginPath();
+    ctx.roundRect(removeX, removeY, removeSize, removeSize, 3);
+    ctx.fillStyle = "#1a0800";
+    ctx.fill();
+    ctx.strokeStyle = "#662200";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.fillStyle    = "#cc4400";
+    ctx.font         = `bold ${removeSize * 0.65}px sans-serif`;
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("✕", removeX + removeSize / 2, removeY + removeSize / 2);
+    this.hitAreas.remove = { x: removeX, y: removeY, w: removeSize, h: removeSize };
+
+    let rposX = widgetWidth - margin - im - removeSize - 4;
 
     if (showSep && this._value.strengthTwo != null) {
       const [sx2, sw2] = drawStrengthWidget(ctx, rposX, posY, height, this._value.strengthTwo ?? 1);
@@ -587,6 +605,11 @@ class PowerLoraWidget {
           this._value.strengthTwo = val;
           node.setDirtyCanvas(true);
         });
+        return true;
+      }
+
+      if (inRect(this.hitAreas.remove)) {
+        node.removeLoraWidget(this);
         return true;
       }
 
